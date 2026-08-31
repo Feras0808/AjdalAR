@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Car,
   CircleDot,
@@ -50,8 +52,19 @@ const services = [
 export default function Services() {
   const [arTitle, setArTitle] = useState<string | null>(null);
 
+  const openAR = (title: string) => {
+    setArTitle(title);
+  };
+
+  const closeAR = () => {
+    setArTitle(null);
+  };
+
   return (
-    <section id="services" className="bg-[#F5F0EA] py-24 lg:py-32">
+    <section
+      id="services"
+      className="bg-[#F5F0EA] py-24 lg:py-32"
+    >
       <div className="mx-auto max-w-7xl px-6 lg:px-10">
 
         {/* Section Header */}
@@ -74,6 +87,10 @@ export default function Services() {
         <div className="mx-auto mt-14 max-w-[900px] space-y-7">
           {services.map((service, index) => {
             const Icon = service.icon;
+
+            const hasAR =
+              service.title === "Custom Full Vehicle Painting" ||
+              service.title === "Peelable Paint Solutions";
 
             return (
               <article
@@ -146,12 +163,32 @@ export default function Services() {
                     {service.description}
                   </p>
 
-                  {(service.title === "Custom Full Vehicle Painting" ||
-                    service.title === "Peelable Paint Solutions") && (
+                  {/* AR Button */}
+                  {hasAR && (
                     <button
                       type="button"
-                      onClick={() => setArTitle(service.title)}
-                      className="mt-6 inline-flex min-h-12 items-center justify-center border border-[#0F4545] bg-[#0F4545] px-6 text-sm font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-300 hover:bg-[#082F2F]"
+                      onClick={() => openAR(service.title)}
+                      className="
+                        mt-6
+                        inline-flex
+                        min-h-12
+                        items-center
+                        justify-center
+                        border
+                        border-[#0F4545]
+                        bg-[#0F4545]
+                        px-6
+                        text-sm
+                        font-semibold
+                        uppercase
+                        tracking-[0.08em]
+                        text-white
+                        transition-all
+                        duration-300
+                        hover:bg-[#082F2F]
+                        hover:shadow-lg
+                        active:scale-[0.98]
+                      "
                     >
                       Try Your Car in AR
                     </button>
@@ -163,8 +200,12 @@ export default function Services() {
         </div>
       </div>
 
-      {arTitle && (
-        <ArPaintVisualizer title={arTitle} onClose={() => setArTitle(null)} />
+      {/* AR Paint Visualizer */}
+      {arTitle !== null && (
+        <ArPaintVisualizer
+          title={arTitle}
+          onClose={closeAR}
+        />
       )}
     </section>
   );
