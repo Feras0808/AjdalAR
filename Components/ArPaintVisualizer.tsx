@@ -1,25 +1,63 @@
 "use client";
 
-import { Camera, Check, RotateCcw, X } from "lucide-react";
+import {
+  Camera,
+  Check,
+  RotateCcw,
+  Scan,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 type Finish = "Gloss" | "Metallic" | "Matte";
 
 type Props = {
-  service: "Custom Full Vehicle Painting" | "Peelable Paint Solutions";
+  service:
+    | "Custom Full Vehicle Painting"
+    | "Peelable Paint Solutions";
   open: boolean;
   onClose: () => void;
 };
 
+type RGB = {
+  r: number;
+  g: number;
+  b: number;
+};
+
 const colors = [
-  { name: "Obsidian Black", value: "#101112" },
-  { name: "Pearl White", value: "#f4f3ee" },
-  { name: "Platinum Silver", value: "#a9adb1" },
-  { name: "Deep Red", value: "#8b1018" },
-  { name: "Racing Blue", value: "#123e70" },
-  { name: "British Green", value: "#173f2c" },
-  { name: "Champagne", value: "#bca789" },
-  { name: "Nardo Grey", value: "#777b7d" },
+  {
+    name: "Obsidian Black",
+    value: "#101112",
+  },
+  {
+    name: "Pearl White",
+    value: "#f4f3ee",
+  },
+  {
+    name: "Platinum Silver",
+    value: "#a9adb1",
+  },
+  {
+    name: "Deep Red",
+    value: "#8b1018",
+  },
+  {
+    name: "Racing Blue",
+    value: "#123e70",
+  },
+  {
+    name: "British Green",
+    value: "#173f2c",
+  },
+  {
+    name: "Champagne",
+    value: "#bca789",
+  },
+  {
+    name: "Nardo Grey",
+    value: "#777b7d",
+  },
 ];
 
 export default function ArPaintVisualizer({
@@ -27,286 +65,363 @@ export default function ArPaintVisualizer({
   open,
   onClose,
 }: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef =
+    useRef<HTMLVideoElement>(null);
 
-  const streamRef = useRef<MediaStream | null>(null);
-  const modelRef = useRef<any>(null);
+  const canvasRef =
+    useRef<HTMLCanvasElement>(null);
 
-  const runningRef = useRef(false);
-  const busyRef = useRef(false);
-  const animationRef = useRef<number | null>(null);
+  const maskCanvasRef =
+    useRef<HTMLCanvasElement>(null);
 
-  const lastProcessRef = useRef(0);
+  const streamRef =
+    useRef<MediaStream | null>(null);
 
-  const [color, setColor] = useState(colors[0].value);
-  const [finish, setFinish] = useState<Finish>("Gloss");
+  const modelRef =
+    useRef<any>(null);
 
-  const [cameraError, setCameraError] = useState("");
-  const [modelStatus, setModelStatus] =
-    useState("Preparing camera…");
+  const maskRef =
+    useRef<Uint8Array | null>(null);
 
-  const [captured, setCaptured] = useState<string | null>(null);
+  const maskWidthRef =
+    useRef(0);
+
+  const maskHeightRef =
+    useRef(0);
+
+  const processingRef =
+    useRef(false);
+
+  const animationRef =
+    useRef<number | null>(null);
+
+  const [color, setColor] =
+    useState("#8b1018");
+
+  const [finish, setFinish] =
+    useState<Finish>("Gloss");
+
+  const [status, setStatus] =
+    useState("Opening camera…");
+
+  const [error, setError] =
+    useState("");
+
+  const [modelReady, setModelReady] =
+    useState(false);
+
+  const [vehicleDetected, setVehicleDetected] =
+    useState(false);
+
+  const [captured, setCaptured] =
+    useState<string | null>(null);
 
   /*
-   * Stop camera + animation
+   * ---------------------------------------------------------
+   * STOP EVERYTHING
+   * ---------------------------------------------------------
    */
-  const stopCamera = () => {
-    runningRef.current = false;
-    busyRef.current = false;
 
-    if (animationRef.current !== null) {
-      cancelAnimationFrame(animationRef.current);
+  const stopCamera = () => {
+    if (
+      animationRef.current !== null
+    ) {
+      cancelAnimationFrame(
+        animationRef.current
+      );
+
       animationRef.current = null;
     }
 
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
+      streamRef.current
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        );
 
       streamRef.current = null;
     }
+
+    processingRef.current =
+      false;
   };
 
   /*
-   * Start camera + AI
+   * ---------------------------------------------------------
+   * START CAMERA
+   * ---------------------------------------------------------
    */
+
   useEffect(() => {
     if (!open) {
       stopCamera();
+
+      maskRef.current = null;
+
       setCaptured(null);
-      setCameraError("");
+      setVehicleDetected(false);
+      setModelReady(false);
+
       return;
     }
 
     let cancelled = false;
 
-    async function start() {
+    async function startCamera() {
       try {
-        setCameraError("");
-        setModelStatus("Opening camera…");
+        setError("");
+        setStatus(
+          "Opening camera…"
+        );
 
-        if (!navigator.mediaDevices?.getUserMedia) {
+        if (
+          !navigator.mediaDevices ||
+          !navigator.mediaDevices
+            .getUserMedia
+        ) {
           throw new Error(
-            "Camera access is not supported by this browser."
+            "Camera is not supported."
           );
         }
 
         /*
-         * Mobile rear camera
+         * Rear camera
          */
         const stream =
-          await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: {
-                ideal: "environment",
+          await navigator.mediaDevices.getUserMedia(
+            {
+              video: {
+                facingMode: {
+                  ideal:
+                    "environment",
+                },
+                width: {
+                  ideal: 1280,
+                },
+                height: {
+                  ideal: 720,
+                },
               },
-              width: {
-                ideal: 1280,
-              },
-              height: {
-                ideal: 720,
-              },
-            },
-            audio: false,
-          });
+              audio: false,
+            }
+          );
 
         if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
+          stream
+            .getTracks()
+            .forEach((track) =>
+              track.stop()
+            );
+
           return;
         }
 
-        streamRef.current = stream;
+        streamRef.current =
+          stream;
 
-        const video = videoRef.current;
+        const video =
+          videoRef.current;
 
         if (!video) {
-          throw new Error("Video element unavailable.");
+          throw new Error(
+            "Camera element unavailable."
+          );
         }
 
-        video.srcObject = stream;
-        video.setAttribute("playsinline", "true");
+        video.srcObject =
+          stream;
+
         video.muted = true;
+
+        video.setAttribute(
+          "playsinline",
+          "true"
+        );
 
         await video.play();
 
-        setModelStatus(
-          "Loading vehicle detection AI…"
+        setStatus(
+          "Loading vehicle detection…"
         );
 
         /*
-         * Transformers.js is loaded only in the browser.
+         * Load Transformers.js only
+         * in the browser.
          */
-        const dynamicImport = new Function(
-          "url",
-          "return import(url)"
-        ) as (url: string) => Promise<any>;
+        const dynamicImport =
+          new Function(
+            "url",
+            "return import(url)"
+          ) as (
+            url: string
+          ) => Promise<any>;
 
-        const transformers = await dynamicImport(
-          "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm"
-        );
+        const transformers =
+          await dynamicImport(
+            "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm"
+          );
 
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
 
         /*
-         * Force WASM for better compatibility on iPhone.
+         * Browser cache enabled.
          */
-        if (transformers.env) {
-          transformers.env.allowLocalModels = false;
-          transformers.env.useBrowserCache = true;
+        if (
+          transformers.env
+        ) {
+          transformers.env.allowLocalModels =
+            false;
 
-          if (transformers.env.backends?.onnx?.wasm) {
-            transformers.env.backends.onnx.wasm.numThreads = 1;
+          transformers.env.useBrowserCache =
+            true;
+
+          if (
+            transformers.env
+              .backends?.onnx?.wasm
+          ) {
+            transformers.env.backends.onnx.wasm.numThreads =
+              1;
           }
         }
 
         /*
-         * IMPORTANT:
+         * Lightweight Cityscapes
+         * SegFormer.
          *
-         * This is Cityscapes, not the old ADE model.
-         * Cityscapes contains a dedicated "car" class.
+         * The model has a dedicated
+         * "car" class.
          */
-        modelRef.current = await transformers.pipeline(
-          "image-segmentation",
-          "Xenova/segformer-b0-finetuned-cityscapes-512-1024",
-          {
-            device: "wasm",
-          }
+        modelRef.current =
+          await transformers.pipeline(
+            "image-segmentation",
+            "Xenova/segformer-b0-finetuned-cityscapes-512-1024",
+            {
+              device: "wasm",
+            }
+          );
+
+        if (cancelled) {
+          return;
+        }
+
+        setModelReady(true);
+
+        setStatus(
+          "Ready — point at the car and scan"
+        );
+      } catch (err) {
+        console.error(
+          "AR startup error:",
+          err
         );
 
-        if (cancelled) return;
-
-        setModelStatus(
-          "Point your camera at the vehicle"
-        );
-
-        runningRef.current = true;
-
-        animationRef.current =
-          requestAnimationFrame(processFrame);
-      } catch (error) {
-        console.error("AR startup error:", error);
-
-        setCameraError(
+        setError(
           "Camera or vehicle detection could not start. Please allow camera access and try Safari or Chrome."
         );
 
-        setModelStatus("Camera unavailable");
+        setStatus(
+          "Camera unavailable"
+        );
       }
     }
 
-    start();
+    startCamera();
 
     return () => {
       cancelled = true;
+
       stopCamera();
     };
   }, [open]);
 
   /*
-   * Process camera frame
+   * ---------------------------------------------------------
+   * SCAN CAR
+   *
+   * AI runs ONLY here.
+   * Not continuously.
+   * ---------------------------------------------------------
    */
-  const processFrame = async () => {
+
+  const scanCar = async () => {
     if (
-      !runningRef.current ||
-      !videoRef.current ||
-      !canvasRef.current
+      processingRef.current ||
+      !modelRef.current ||
+      !videoRef.current
     ) {
       return;
     }
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
+    const video =
+      videoRef.current;
 
-    const now = performance.now();
-
-    /*
-     * Don't overload iPhone.
-     * Process approximately every 700ms.
-     */
     if (
-      now - lastProcessRef.current <
-      700
+      video.readyState < 2
     ) {
-      animationRef.current =
-        requestAnimationFrame(processFrame);
-
       return;
     }
 
-    if (
-      video.readyState < 2 ||
-      busyRef.current ||
-      !modelRef.current
-    ) {
-      animationRef.current =
-        requestAnimationFrame(processFrame);
+    processingRef.current =
+      true;
 
-      return;
-    }
+    setStatus(
+      "Scanning vehicle…"
+    );
 
-    busyRef.current = true;
-    lastProcessRef.current = now;
+    setError("");
 
     try {
-      const width = video.videoWidth;
-      const height = video.videoHeight;
-
-      if (!width || !height) {
-        throw new Error(
-          "Video dimensions unavailable."
-        );
-      }
-
       /*
-       * Smaller inference image for mobile performance.
+       * Keep AI input small.
+       * This is important for iPhone.
        */
-      const input = document.createElement(
-        "canvas"
-      );
+      const input =
+        document.createElement(
+          "canvas"
+        );
 
-      const maxSide = 640;
+      const maxWidth = 512;
 
-      const scale = Math.min(
-        1,
-        maxSide /
-          Math.max(width, height)
-      );
+      const scale =
+        Math.min(
+          1,
+          maxWidth /
+            video.videoWidth
+        );
 
-      input.width = Math.max(
-        1,
-        Math.round(width * scale)
-      );
+      input.width =
+        Math.max(
+          1,
+          Math.round(
+            video.videoWidth *
+              scale
+          )
+        );
 
-      input.height = Math.max(
-        1,
-        Math.round(height * scale)
-      );
+      input.height =
+        Math.max(
+          1,
+          Math.round(
+            video.videoHeight *
+              scale
+          )
+        );
 
-      const inputContext =
+      const ctx =
         input.getContext("2d", {
           willReadFrequently: true,
         });
 
-      const outputContext =
-        canvas.getContext("2d", {
-          willReadFrequently: true,
-        });
-
-      if (
-        !inputContext ||
-        !outputContext
-      ) {
+      if (!ctx) {
         throw new Error(
           "Canvas unavailable."
         );
       }
 
-      /*
-       * Draw current camera frame.
-       */
-      inputContext.drawImage(
+      ctx.drawImage(
         video,
         0,
         0,
@@ -315,434 +430,604 @@ export default function ArPaintVisualizer({
       );
 
       /*
-       * Run segmentation.
+       * Run AI ONCE.
        */
       const result =
-        await modelRef.current(input);
+        await modelRef.current(
+          input
+        );
 
       /*
-       * Find the CAR class.
+       * Find car class.
        */
-      const carMaskResult =
-        result?.find((item: any) => {
-          const label = String(
-            item?.label ?? ""
-          ).toLowerCase();
+      const car =
+        result?.find(
+          (item: any) => {
+            const label =
+              String(
+                item?.label ??
+                  ""
+              ).toLowerCase();
 
-          return (
-            label === "car" ||
-            label.includes("car")
-          );
-        });
-
-      /*
-       * Always draw the original camera.
-       */
-      canvas.width = width;
-      canvas.height = height;
-
-      outputContext.clearRect(
-        0,
-        0,
-        width,
-        height
-      );
-
-      outputContext.drawImage(
-        video,
-        0,
-        0,
-        width,
-        height
-      );
+            return (
+              label === "car"
+            );
+          }
+        );
 
       if (
-        !carMaskResult?.mask
+        !car ||
+        !car.mask
       ) {
-        setModelStatus(
-          "Point your camera at the vehicle"
+        setVehicleDetected(
+          false
+        );
+
+        setStatus(
+          "No car detected — move closer and scan again"
         );
 
         return;
       }
 
-      const rawMask =
-        carMaskResult.mask;
+      const rawData =
+        car.mask.data;
 
       const maskWidth =
-        Number(rawMask.width) ||
+        Number(
+          car.mask.width
+        ) ||
         input.width;
 
       const maskHeight =
-        Number(rawMask.height) ||
+        Number(
+          car.mask.height
+        ) ||
         input.height;
 
-      const rawData =
-        rawMask.data;
-
       if (!rawData) {
-        setModelStatus(
-          "Vehicle detection unavailable"
+        throw new Error(
+          "Vehicle mask unavailable."
+        );
+      }
+
+      /*
+       * Convert mask.
+       */
+      const normalized =
+        normalizeMask(
+          rawData,
+          maskWidth,
+          maskHeight
+        );
+
+      /*
+       * Keep largest connected
+       * vehicle.
+       */
+      const largest =
+        largestComponent(
+          normalized,
+          maskWidth,
+          maskHeight,
+          80
+        );
+
+      if (!largest) {
+        setVehicleDetected(
+          false
+        );
+
+        setStatus(
+          "Car not detected clearly — scan again"
         );
 
         return;
       }
 
       /*
-       * Convert the returned RawImage mask
-       * into a simple single-channel mask.
+       * Save mask.
        */
-      const mask = normalizeMask(
-        rawData,
-        maskWidth,
-        maskHeight
+      maskRef.current =
+        largest;
+
+      maskWidthRef.current =
+        maskWidth;
+
+      maskHeightRef.current =
+        maskHeight;
+
+      /*
+       * Create mask canvas.
+       */
+      const maskCanvas =
+        maskCanvasRef.current;
+
+      if (maskCanvas) {
+        maskCanvas.width =
+          maskWidth;
+
+        maskCanvas.height =
+          maskHeight;
+
+        const maskContext =
+          maskCanvas.getContext(
+            "2d"
+          );
+
+        if (maskContext) {
+          const image =
+            maskContext.createImageData(
+              maskWidth,
+              maskHeight
+            );
+
+          for (
+            let i = 0;
+            i <
+            largest.length;
+            i++
+          ) {
+            const value =
+              largest[i];
+
+            const index =
+              i * 4;
+
+            image.data[
+              index
+            ] = 255;
+
+            image.data[
+              index + 1
+            ] = 255;
+
+            image.data[
+              index + 2
+            ] = 255;
+
+            image.data[
+              index + 3
+            ] = value;
+          }
+
+          maskContext.putImageData(
+            image,
+            0,
+            0
+          );
+        }
+      }
+
+      setVehicleDetected(
+        true
+      );
+
+      setStatus(
+        "Vehicle detected • choose your color"
       );
 
       /*
-       * Find the largest connected vehicle.
+       * Start cheap live rendering.
+       * NO MORE AI.
        */
-      const mainComponent =
-        largestComponent(
-          mask,
-          maskWidth,
-          maskHeight,
-          90
+      startRendering();
+    } catch (err) {
+      console.error(
+        "Vehicle scan error:",
+        err
+      );
+
+      setVehicleDetected(
+        false
+      );
+
+      setStatus(
+        "Scan failed — please try again"
+      );
+    } finally {
+      processingRef.current =
+        false;
+    }
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * LIVE COLOR RENDERING
+   *
+   * This part does NOT use AI.
+   * ---------------------------------------------------------
+   */
+
+  const startRendering = () => {
+    if (
+      animationRef.current !==
+      null
+    ) {
+      cancelAnimationFrame(
+        animationRef.current
+      );
+    }
+
+    const render = () => {
+      renderPaint();
+
+      animationRef.current =
+        requestAnimationFrame(
+          render
         );
+    };
 
-      if (!mainComponent) {
-        setModelStatus(
-          "Move closer and point at the vehicle"
-        );
+    render();
+  };
 
-        return;
-      }
+  const renderPaint = () => {
+    const video =
+      videoRef.current;
 
-      /*
-       * Get original camera pixels.
-       */
-      const frame =
-        inputContext.getImageData(
-          0,
-          0,
-          input.width,
-          input.height
-        );
+    const canvas =
+      canvasRef.current;
 
-      /*
-       * Create recolored frame.
-       */
-      const painted =
-        document.createElement(
-          "canvas"
-        );
+    const mask =
+      maskRef.current;
 
-      painted.width =
-        input.width;
+    if (
+      !video ||
+      !canvas ||
+      !mask
+    ) {
+      return;
+    }
 
-      painted.height =
-        input.height;
+    if (
+      video.readyState < 2
+    ) {
+      return;
+    }
 
-      const paintedContext =
-        painted.getContext("2d", {
-          willReadFrequently: true,
-        });
+    /*
+     * Render at reduced resolution.
+     *
+     * This is MUCH cheaper on iPhone
+     * than processing 1280x720.
+     */
+    const renderWidth = 640;
 
-      if (!paintedContext) {
-        throw new Error(
-          "Paint canvas unavailable."
-        );
-      }
+    const ratio =
+      video.videoHeight /
+      video.videoWidth;
 
-      const rgb =
-        hexToRgb(color);
+    const renderHeight =
+      Math.round(
+        renderWidth * ratio
+      );
 
-      const targetHsl =
-        rgbToHsl(
-          rgb.r,
-          rgb.g,
-          rgb.b
-        );
+    canvas.width =
+      renderWidth;
 
-      const output =
-        paintedContext.createImageData(
-          input.width,
-          input.height
-        );
+    canvas.height =
+      renderHeight;
 
-      /*
-       * Recolor only the car.
-       */
+    const context =
+      canvas.getContext(
+        "2d"
+      );
+
+    if (!context) {
+      return;
+    }
+
+    /*
+     * Draw original camera.
+     */
+    context.drawImage(
+      video,
+      0,
+      0,
+      renderWidth,
+      renderHeight
+    );
+
+    const frame =
+      context.getImageData(
+        0,
+        0,
+        renderWidth,
+        renderHeight
+      );
+
+    const output =
+      new ImageData(
+        new Uint8ClampedArray(
+          frame.data
+        ),
+        renderWidth,
+        renderHeight
+      );
+
+    const maskWidth =
+      maskWidthRef.current;
+
+    const maskHeight =
+      maskHeightRef.current;
+
+    const paint =
+      hexToRgb(color);
+
+    const targetHsl =
+      rgbToHsl(
+        paint.r,
+        paint.g,
+        paint.b
+      );
+
+    for (
+      let y = 0;
+      y < renderHeight;
+      y++
+    ) {
       for (
-        let y = 0;
-        y < input.height;
-        y++
+        let x = 0;
+        x < renderWidth;
+        x++
       ) {
-        for (
-          let x = 0;
-          x < input.width;
-          x++
-        ) {
-          const outputIndex =
-            (y * input.width + x) * 4;
+        const index =
+          (y *
+            renderWidth +
+            x) *
+          4;
 
-          /*
-           * Convert camera pixel to
-           * segmentation coordinates.
-           */
-          const mx = Math.min(
+        /*
+         * Find matching mask pixel.
+         */
+        const mx =
+          Math.min(
             maskWidth - 1,
             Math.max(
               0,
               Math.round(
                 (x /
-                  input.width) *
-                  (maskWidth - 1)
+                  renderWidth) *
+                  (maskWidth -
+                    1)
               )
             )
           );
 
-          const my = Math.min(
+        const my =
+          Math.min(
             maskHeight - 1,
             Math.max(
               0,
               Math.round(
                 (y /
-                  input.height) *
-                  (maskHeight - 1)
+                  renderHeight) *
+                  (maskHeight -
+                    1)
               )
             )
           );
 
-          const maskIndex =
-            my * maskWidth + mx;
+        const maskIndex =
+          my *
+            maskWidth +
+          mx;
 
-          const alpha =
-            mainComponent[
-              maskIndex
-            ] ?? 0;
+        const maskAlpha =
+          mask[maskIndex];
 
-          /*
-           * Outside car.
-           */
-          if (alpha < 10) {
-            continue;
-          }
-
-          const r =
-            frame.data[
-              outputIndex
-            ];
-
-          const g =
-            frame.data[
-              outputIndex + 1
-            ];
-
-          const b =
-            frame.data[
-              outputIndex + 2
-            ];
-
-          const originalHsl =
-            rgbToHsl(r, g, b);
-
-          /*
-           * Very dark pixels are likely:
-           *
-           * - tires
-           * - grilles
-           * - vents
-           * - deep gaps
-           * - some glass
-           *
-           * Keep those mostly original.
-           */
-          const darkProtection =
-            clamp(
-              (0.22 -
-                originalHsl.l) /
-                0.22,
-              0,
-              1
-            );
-
-          /*
-           * Very low saturation areas are
-           * generally easier to recolor.
-           */
-          let paintStrength =
-            alpha / 255;
-
-          /*
-           * Reduce strength on very dark areas.
-           */
-          paintStrength *=
-            1 -
-            darkProtection * 0.88;
-
-          /*
-           * Finish adjustments.
-           */
-          let targetSaturation =
-            targetHsl.s;
-
-          let brightnessFactor = 1;
-
-          if (finish === "Matte") {
-            targetSaturation *= 0.72;
-            brightnessFactor = 0.92;
-          }
-
-          if (finish === "Metallic") {
-            targetSaturation *= 0.95;
-            brightnessFactor = 1.05;
-          }
-
-          if (finish === "Gloss") {
-            targetSaturation *= 1;
-            brightnessFactor = 1.03;
-          }
-
-          /*
-           * Preserve the original body's
-           * brightness and reflections.
-           */
-          let targetLightness =
-            originalHsl.l *
-            brightnessFactor;
-
-          /*
-           * Prevent extreme values.
-           */
-          targetLightness =
-            clamp(
-              targetLightness,
-              0.08,
-              0.92
-            );
-
-          targetSaturation =
-            clamp(
-              targetSaturation,
-              0,
-              1
-            );
-
-          const recolored =
-            hslToRgb(
-              targetHsl.h,
-              targetSaturation,
-              targetLightness
-            );
-
-          /*
-           * Lower blending than before.
-           * This lets the real car's
-           * reflections remain visible.
-           */
-          const blend =
-            clamp(
-              paintStrength *
-                (finish === "Gloss"
-                  ? 0.78
-                  : finish === "Metallic"
-                  ? 0.72
-                  : 0.64),
-              0,
-              0.86
-            );
-
-          if (blend < 0.01) {
-            continue;
-          }
-
-          /*
-           * Blend selected paint with
-           * the original image.
-           */
-          output.data[
-            outputIndex
-          ] = Math.round(
-            r * (1 - blend) +
-              recolored.r * blend
-          );
-
-          output.data[
-            outputIndex + 1
-          ] = Math.round(
-            g * (1 - blend) +
-              recolored.g * blend
-          );
-
-          output.data[
-            outputIndex + 2
-          ] = Math.round(
-            b * (1 - blend) +
-              recolored.b * blend
-          );
-
-          output.data[
-            outputIndex + 3
-          ] = Math.round(
-            blend * 255
-          );
+        if (
+          maskAlpha <
+          40
+        ) {
+          continue;
         }
-      }
 
-      paintedContext.putImageData(
-        output,
-        0,
-        0
-      );
+        const r =
+          frame.data[index];
 
-      /*
-       * Overlay ONLY the recolored pixels.
-       *
-       * Original camera remains underneath.
-       */
-      outputContext.drawImage(
-        painted,
-        0,
-        0,
-        width,
-        height
-      );
+        const g =
+          frame.data[
+            index + 1
+          ];
 
-      setModelStatus(
-        "Vehicle detected • choose your color"
-      );
-    } catch (error) {
-      console.error(
-        "AR processing error:",
-        error
-      );
+        const b =
+          frame.data[
+            index + 2
+          ];
 
-      setModelStatus(
-        "Move closer and point at the vehicle"
-      );
-    } finally {
-      busyRef.current = false;
-
-      if (runningRef.current) {
-        animationRef.current =
-          requestAnimationFrame(
-            processFrame
+        const originalHsl =
+          rgbToHsl(
+            r,
+            g,
+            b
           );
+
+        /*
+         * Protect very dark details:
+         * tires, vents, grilles,
+         * gaps and some glass.
+         */
+        const dark =
+          clamp(
+            (0.14 -
+              originalHsl.l) /
+              0.14,
+            0,
+            1
+          );
+
+        /*
+         * Keep original lighting.
+         */
+        let saturation =
+          targetHsl.s;
+
+        if (
+          finish ===
+          "Matte"
+        ) {
+          saturation *=
+            0.68;
+        }
+
+        if (
+          finish ===
+          "Metallic"
+        ) {
+          saturation *=
+            0.9;
+        }
+
+        /*
+         * Paint strength.
+         */
+        let strength =
+          (maskAlpha /
+            255) *
+          (1 -
+            dark *
+              0.9);
+
+        /*
+         * Slightly stronger
+         * than the previous version.
+         */
+        if (
+          finish ===
+          "Gloss"
+        ) {
+          strength *=
+            0.72;
+        }
+
+        if (
+          finish ===
+          "Metallic"
+        ) {
+          strength *=
+            0.68;
+        }
+
+        if (
+          finish ===
+          "Matte"
+        ) {
+          strength *=
+            0.62;
+        }
+
+        strength =
+          clamp(
+            strength,
+            0,
+            0.82
+          );
+
+        if (
+          strength <
+          0.02
+        ) {
+          continue;
+        }
+
+        /*
+         * Preserve original
+         * lightness/reflections.
+         */
+        const recolored =
+          hslToRgb(
+            targetHsl.h,
+            clamp(
+              saturation,
+              0,
+              1
+            ),
+            clamp(
+              originalHsl.l,
+              0.07,
+              0.93
+            )
+          );
+
+        output.data[
+          index
+        ] =
+          r *
+            (1 -
+              strength) +
+          recolored.r *
+            strength;
+
+        output.data[
+          index + 1
+        ] =
+          g *
+            (1 -
+              strength) +
+          recolored.g *
+            strength;
+
+        output.data[
+          index + 2
+        ] =
+          b *
+            (1 -
+              strength) +
+          recolored.b *
+            strength;
+
+        output.data[
+          index + 3
+        ] = 255;
       }
     }
+
+    context.putImageData(
+      output,
+      0,
+      0
+    );
   };
 
   /*
-   * Capture current AR preview.
+   * ---------------------------------------------------------
+   * COLOR CHANGE
+   *
+   * Re-render immediately.
+   * No AI.
+   * ---------------------------------------------------------
    */
+
+  useEffect(() => {
+    if (
+      vehicleDetected
+    ) {
+      renderPaint();
+    }
+  }, [
+    color,
+    finish,
+    vehicleDetected,
+  ]);
+
+  /*
+   * ---------------------------------------------------------
+   * CAPTURE
+   * ---------------------------------------------------------
+   */
+
   const capture = () => {
     const video =
       videoRef.current;
 
-    const overlay =
+    const canvas =
       canvasRef.current;
 
-    if (!video || !overlay) {
+    if (
+      !video ||
+      !canvas
+    ) {
       return;
     }
 
@@ -758,14 +1043,20 @@ export default function ArPaintVisualizer({
       video.videoHeight;
 
     const context =
-      photo.getContext("2d");
+      photo.getContext(
+        "2d"
+      );
 
     if (!context) {
       return;
     }
 
+    /*
+     * Use the current rendered
+     * preview.
+     */
     context.drawImage(
-      overlay,
+      canvas,
       0,
       0,
       photo.width,
@@ -775,14 +1066,17 @@ export default function ArPaintVisualizer({
     setCaptured(
       photo.toDataURL(
         "image/jpeg",
-        0.92
+        0.9
       )
     );
   };
 
   /*
-   * Request selected color.
+   * ---------------------------------------------------------
+   * REQUEST COLOR
+   * ---------------------------------------------------------
    */
+
   const requestColor = () => {
     const selected =
       colors.find(
@@ -796,6 +1090,7 @@ export default function ArPaintVisualizer({
       color.toUpperCase();
 
     stopCamera();
+
     onClose();
 
     const params =
@@ -810,16 +1105,24 @@ export default function ArPaintVisualizer({
       `contact?${params.toString()}`;
   };
 
+  /*
+   * ---------------------------------------------------------
+   * CLOSE
+   * ---------------------------------------------------------
+   */
+
   if (!open) {
     return null;
   }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#061f1f]/95 p-3 sm:p-6">
+
       <div className="flex h-full max-h-[900px] w-full max-w-6xl flex-col overflow-hidden bg-[#F5F0EA] shadow-2xl">
 
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between bg-[#082F2F] px-5 py-4 text-white sm:px-7">
+
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#BD9872]">
               Ajdal Paint Studio
@@ -837,13 +1140,12 @@ export default function ArPaintVisualizer({
               onClose();
             }}
             className="flex h-11 w-11 items-center justify-center border border-white/20 transition hover:bg-white hover:text-[#0F4545]"
-            aria-label="Close AR paint studio"
           >
             <X size={22} />
           </button>
         </div>
 
-        {/* Main */}
+        {/* Content */}
         <div className="grid min-h-0 flex-1 overflow-auto lg:grid-cols-[1fr_340px]">
 
           {/* Camera */}
@@ -852,7 +1154,7 @@ export default function ArPaintVisualizer({
             {captured ? (
               <img
                 src={captured}
-                alt="Captured AR paint preview"
+                alt="AR paint preview"
                 className="h-full w-full object-contain"
               />
             ) : (
@@ -873,24 +1175,31 @@ export default function ArPaintVisualizer({
             )}
 
             {/* Status */}
-            <div className="absolute left-4 top-4 max-w-[calc(100%-2rem)] bg-[#082F2F]/90 px-4 py-3 text-xs font-medium text-white backdrop-blur-sm">
-              {cameraError ||
-                modelStatus}
+            <div className="absolute left-4 top-4 max-w-[calc(100%-2rem)] bg-[#082F2F]/90 px-4 py-3 text-sm font-medium text-white backdrop-blur-sm">
+
+              {error ||
+                status}
+
             </div>
 
-            {/* Camera Button */}
-            {!captured && (
-              <div className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-3">
+            {/* Scan Button */}
+            {!captured &&
+              modelReady && (
                 <button
                   type="button"
-                  onClick={capture}
-                  className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-white bg-[#BD9872] text-[#0F4545] shadow-xl transition hover:scale-105"
-                  aria-label="Take photo"
+                  onClick={scanCar}
+                  disabled={
+                    processingRef.current
+                  }
+                  className="absolute bottom-5 left-1/2 flex min-h-14 -translate-x-1/2 items-center gap-2 bg-[#BD9872] px-6 font-bold uppercase tracking-wide text-[#0F4545] shadow-xl transition hover:bg-white disabled:opacity-60"
                 >
-                  <Camera size={25} />
+                  <Scan size={20} />
+
+                  {vehicleDetected
+                    ? "Scan Again"
+                    : "Scan Car"}
                 </button>
-              </div>
-            )}
+              )}
           </div>
 
           {/* Controls */}
@@ -899,42 +1208,51 @@ export default function ArPaintVisualizer({
             {/* Finish */}
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#BD9872]">
-                Choose Your Finish
+                Choose your finish
               </p>
 
               <div className="mt-3 grid grid-cols-3 gap-2">
+
                 {(
                   [
                     "Gloss",
                     "Metallic",
                     "Matte",
                   ] as Finish[]
-                ).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() =>
-                      setFinish(item)
-                    }
-                    className={`min-h-11 border px-2 text-xs font-semibold uppercase transition ${
-                      finish === item
-                        ? "border-[#0F4545] bg-[#0F4545] text-white"
-                        : "border-neutral-300 bg-white text-[#0F4545] hover:border-[#BD9872]"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
+                ).map(
+                  (item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() =>
+                        setFinish(
+                          item
+                        )
+                      }
+                      className={`min-h-11 border px-2 text-xs font-semibold uppercase transition ${
+                        finish ===
+                        item
+                          ? "border-[#0F4545] bg-[#0F4545] text-white"
+                          : "border-neutral-300 bg-white text-[#0F4545] hover:border-[#BD9872]"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
               </div>
             </div>
 
             {/* Colors */}
             <div className="mt-7">
+
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#BD9872]">
-                Paint Color
+                Paint color
               </p>
 
               <div className="mt-4 grid grid-cols-4 gap-4">
+
                 {colors.map(
                   (item) => (
                     <button
@@ -974,16 +1292,20 @@ export default function ArPaintVisualizer({
                     </button>
                   )
                 )}
+
               </div>
 
-              {/* Custom Color */}
+              {/* Custom color */}
               <label className="mt-5 block text-xs font-bold uppercase tracking-[0.15em] text-[#0F4545]">
-                Custom Color
+
+                Custom color
 
                 <input
                   type="color"
                   value={color}
-                  onChange={(event) =>
+                  onChange={(
+                    event
+                  ) =>
                     setColor(
                       event.target
                         .value
@@ -991,34 +1313,83 @@ export default function ArPaintVisualizer({
                   }
                   className="mt-2 h-12 w-full cursor-pointer border border-neutral-300 bg-white p-1"
                 />
+
               </label>
             </div>
 
-            {/* Back Camera */}
+            {/* Camera instructions */}
+            {!vehicleDetected &&
+              modelReady && (
+                <div className="mt-7 border border-[#BD9872]/40 bg-white p-4">
+
+                  <p className="text-sm font-semibold text-[#0F4545]">
+                    How to use
+                  </p>
+
+                  <ol className="mt-2 space-y-2 text-xs leading-5 text-neutral-600">
+                    <li>
+                      1. Point the camera at
+                      the entire car.
+                    </li>
+
+                    <li>
+                      2. Tap{" "}
+                      <strong>
+                        Scan Car
+                      </strong>
+                      .
+                    </li>
+
+                    <li>
+                      3. Choose a paint
+                      color.
+                    </li>
+
+                    <li>
+                      4. Change the finish
+                      instantly.
+                    </li>
+                  </ol>
+
+                </div>
+              )}
+
+            {/* Capture */}
             {captured && (
               <button
                 type="button"
                 onClick={() => {
-                  setCaptured(null);
-
-                  setModelStatus(
-                    "Point your camera at the vehicle"
+                  setCaptured(
+                    null
                   );
 
-                  runningRef.current =
-                    true;
-
-                  animationRef.current =
-                    requestAnimationFrame(
-                      processFrame
-                    );
+                  startRendering();
                 }}
                 className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 border border-[#0F4545] px-4 text-sm font-semibold uppercase tracking-wide text-[#0F4545] transition hover:bg-[#0F4545] hover:text-white"
               >
-                <RotateCcw size={17} />
+                <RotateCcw
+                  size={17}
+                />
+
                 Back to Camera
               </button>
             )}
+
+            {/* Take photo */}
+            {!captured &&
+              vehicleDetected && (
+                <button
+                  type="button"
+                  onClick={capture}
+                  className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 border border-[#0F4545] bg-white px-4 text-sm font-semibold uppercase tracking-wide text-[#0F4545] transition hover:bg-[#0F4545] hover:text-white"
+                >
+                  <Camera
+                    size={18}
+                  />
+
+                  Take Photo
+                </button>
+              )}
 
             {/* Request */}
             <button
@@ -1032,15 +1403,12 @@ export default function ArPaintVisualizer({
             </button>
 
             <p className="mt-4 text-xs leading-5 text-neutral-500">
-              AR preview is an
-              estimate. Final
-              color and finish
-              can vary depending
-              on lighting,
-              vehicle material
-              and the selected
-              paint system.
+              AR preview is an estimate.
+              Final color can vary depending
+              on lighting, vehicle material
+              and the selected paint system.
             </p>
+
           </aside>
         </div>
       </div>
@@ -1049,64 +1417,54 @@ export default function ArPaintVisualizer({
 }
 
 /* =========================================================
-   MASK HANDLING
+   MASK
    ========================================================= */
 
 function normalizeMask(
   data: ArrayLike<number>,
   width: number,
   height: number
-): Uint8Array {
+) {
   const pixels =
     width * height;
 
-  const result =
-    new Uint8Array(pixels);
-
-  if (
-    !width ||
-    !height ||
-    data.length === 0
-  ) {
-    return result;
-  }
-
-  /*
-   * Transformers.js RawImage can expose
-   * different channel layouts.
-   *
-   * Detect whether this is:
-   *
-   * 1 channel:
-   * [a,a,a,a,...]
-   *
-   * or 4 channel:
-   * [r,g,b,a,r,g,b,a,...]
-   */
-  const channels =
-    Math.round(
-      data.length / pixels
+  const output =
+    new Uint8Array(
+      pixels
     );
 
-  if (channels === 1) {
+  const channels =
+    Math.round(
+      data.length /
+        pixels
+    );
+
+  if (
+    channels === 1
+  ) {
     for (
       let i = 0;
       i < pixels;
       i++
     ) {
-      result[i] =
+      output[i] =
         clampByte(
-          Number(data[i])
+          Number(
+            data[i]
+          )
         );
     }
 
-    return result;
+    return output;
   }
 
   /*
-   * If 4-channel, use alpha.
+   * RawImage may have
+   * RGB/RGBA channels.
    */
-  if (channels >= 4) {
+  if (
+    channels >= 4
+  ) {
     for (
       let i = 0;
       i < pixels;
@@ -1114,42 +1472,44 @@ function normalizeMask(
     ) {
       const alpha =
         Number(
-          data[i * channels + 3]
+          data[
+            i *
+              channels +
+              3
+          ]
         );
 
       const red =
         Number(
-          data[i * channels]
+          data[
+            i *
+              channels
+          ]
         );
 
-      /*
-       * Some segmentation masks
-       * may be stored as grayscale
-       * RGB with no useful alpha.
-       */
-      result[i] =
-        alpha > 0
-          ? clampByte(alpha)
-          : clampByte(red);
+      output[i] =
+        clampByte(
+          alpha > 0
+            ? alpha
+            : red
+        );
     }
 
-    return result;
+    return output;
   }
 
-  /*
-   * Fallback.
-   */
   for (
     let i = 0;
     i < pixels;
     i++
   ) {
-    result[i] =
+    output[i] =
       clampByte(
         Number(
           data[
             Math.min(
-              data.length - 1,
+              data.length -
+                1,
               i
             )
           ]
@@ -1157,11 +1517,11 @@ function normalizeMask(
       );
   }
 
-  return result;
+  return output;
 }
 
 /* =========================================================
-   LARGEST CONNECTED VEHICLE
+   LARGEST CAR
    ========================================================= */
 
 function largestComponent(
@@ -1169,33 +1529,21 @@ function largestComponent(
   width: number,
   height: number,
   threshold: number
-): Uint8Array | null {
-  if (
-    width <= 0 ||
-    height <= 0 ||
-    data.length <
-      width * height
-  ) {
-    return null;
-  }
+) {
+  const total =
+    width * height;
 
   const visited =
     new Uint8Array(
-      width * height
+      total
     );
 
-  let best:
-    | number[]
-    | null = null;
+  let best: number[] =
+    [];
 
-  /*
-   * We don't want thousands of tiny
-   * disconnected components.
-   */
   for (
     let start = 0;
-    start <
-    width * height;
+    start < total;
     start++
   ) {
     if (
@@ -1206,102 +1554,121 @@ function largestComponent(
       continue;
     }
 
-    const queue: number[] = [
-      start,
-    ];
+    const queue =
+      [start];
 
-    const component: number[] =
+    const component:
+      number[] =
       [];
 
-    visited[start] = 1;
+    visited[start] =
+      1;
 
     for (
       let q = 0;
-      q < queue.length;
+      q <
+      queue.length;
       q++
     ) {
       const index =
         queue[q];
 
-      component.push(index);
+      component.push(
+        index
+      );
 
       const x =
         index % width;
 
       const y =
         Math.floor(
-          index / width
+          index /
+            width
         );
 
-      const neighbors = [
-        index - 1,
-        index + 1,
-        index - width,
-        index + width,
-      ];
+      const left =
+        x > 0
+          ? index - 1
+          : -1;
 
-      if (x === 0) {
-        neighbors[0] = -1;
-      }
+      const right =
+        x <
+        width - 1
+          ? index + 1
+          : -1;
 
-      if (x === width - 1) {
-        neighbors[1] = -1;
-      }
+      const up =
+        y > 0
+          ? index -
+            width
+          : -1;
 
-      if (y === 0) {
-        neighbors[2] = -1;
-      }
+      const down =
+        y <
+        height - 1
+          ? index +
+            width
+          : -1;
 
-      if (y === height - 1) {
-        neighbors[3] = -1;
-      }
+      const neighbors =
+        [
+          left,
+          right,
+          up,
+          down,
+        ];
 
       for (
-        const next of neighbors
+        const next of
+          neighbors
       ) {
         if (
           next >= 0 &&
           next <
-            width * height &&
+            total &&
           !visited[next] &&
           data[next] >=
             threshold
         ) {
-          visited[next] = 1;
-          queue.push(next);
+          visited[next] =
+            1;
+
+          queue.push(
+            next
+          );
         }
       }
     }
 
     if (
-      !best ||
       component.length >
-        best.length
+      best.length
     ) {
-      best = component;
+      best =
+        component;
     }
   }
 
   if (
-    !best ||
-    !best.length
+    best.length === 0
   ) {
     return null;
   }
 
-  const mask =
+  const result =
     new Uint8Array(
-      width * height
+      total
     );
 
   for (
-    const index of best
+    const index of
+      best
   ) {
-    mask[index] =
+    result[index] =
       data[index];
   }
 
-  return mask;
+  return result;
 }
 
 /* =========================================================
@@ -1315,14 +1682,21 @@ function clamp(
 ) {
   return Math.min(
     max,
-    Math.max(min, value)
+    Math.max(
+      min,
+      value
+    )
   );
 }
 
 function clampByte(
   value: number
 ) {
-  if (!Number.isFinite(value)) {
+  if (
+    !Number.isFinite(
+      value
+    )
+  ) {
     return 0;
   }
 
@@ -1337,7 +1711,7 @@ function clampByte(
 
 function hexToRgb(
   hex: string
-) {
+): RGB {
   const clean =
     hex.replace(
       "#",
@@ -1349,8 +1723,8 @@ function hexToRgb(
       ? clean
           .split("")
           .map(
-            (item) =>
-              item + item
+            (x) =>
+              x + x
           )
           .join("")
       : clean;
@@ -1362,7 +1736,9 @@ function hexToRgb(
     );
 
   if (
-    !Number.isFinite(value)
+    !Number.isFinite(
+      value
+    )
   ) {
     return {
       r: 17,
@@ -1395,16 +1771,25 @@ function rgbToHsl(
   b /= 255;
 
   const max =
-    Math.max(r, g, b);
+    Math.max(
+      r,
+      g,
+      b
+    );
 
   const min =
-    Math.min(r, g, b);
+    Math.min(
+      r,
+      g,
+      b
+    );
 
   let h = 0;
   let s = 0;
 
   const l =
-    (max + min) / 2;
+    (max + min) /
+    2;
 
   const d =
     max - min;
@@ -1425,7 +1810,9 @@ function rgbToHsl(
         h =
           (g - b) /
             d +
-          (g < b ? 6 : 0);
+          (g < b
+            ? 6
+            : 0);
         break;
 
       case g:
@@ -1457,8 +1844,10 @@ function hslToRgb(
   h: number,
   s: number,
   l: number
-) {
-  if (s === 0) {
+): RGB {
+  if (
+    s === 0
+  ) {
     const value =
       Math.round(
         l * 255
@@ -1476,13 +1865,11 @@ function hslToRgb(
     q: number,
     t: number
   ) => {
-    if (t < 0) {
+    if (t < 0)
       t += 1;
-    }
 
-    if (t > 1) {
+    if (t > 1)
       t -= 1;
-    }
 
     if (
       t <
